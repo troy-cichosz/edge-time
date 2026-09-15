@@ -1,0 +1,125 @@
+# ============================================================
+# edge-time
+# AGENT
+# ============================================================
+
+# ------------------------------------------------------------
+# Service role
+# ------------------------------------------------------------
+
+EDGE_TIME_ROLE=agent
+
+EDGE_TIME_HOST=0.0.0.0
+EDGE_TIME_PORT=8095
+
+# Leave identity empty.
+# edge-time derives the effective device identity from the
+# host/container hostname.
+#
+# This allows the exact same .env to run on:
+#
+#   pi4SSD
+#   pi4nVME
+#
+EDGE_TIME_DEVICE_ID=
+EDGE_TIME_NODE_ID=
+
+# ------------------------------------------------------------
+# Platform authority
+# ------------------------------------------------------------
+#
+# All agents currently use spoo-lin as the platform authority.
+#
+EDGE_TIME_AUTHORITY_URL=http://spoo-lin.spoocannon.com:8095
+EDGE_TIME_AUTHORITY_ID=spoo-lin.spoocannon.com
+
+# ------------------------------------------------------------
+# Local GNSS
+# ------------------------------------------------------------
+#
+# Leave EDGE_TIME_GNSS_URL and EDGE_TIME_GNSS_HOST empty.
+#
+# edge-time automatically derives the local edge-gps endpoint
+# from the host identity:
+#
+#   http://<hostname>:8096/observation
+#
+# Therefore:
+#
+#   pi4SSD  -> http://pi4SSD:8096/observation
+#   pi4nVME -> http://pi4nVME:8096/observation
+#
+EDGE_TIME_GNSS_URL=
+EDGE_TIME_GNSS_HOST=
+EDGE_TIME_GNSS_PORT=8096
+EDGE_TIME_GNSS_PATH=/observation
+
+# ------------------------------------------------------------
+# Agent source priority
+# ------------------------------------------------------------
+#
+# Platform authority takes precedence over local sources.
+#
+EDGE_TIME_SOURCE_PRIORITY=authority,gnss,rtc,ntp,system
+
+EDGE_TIME_ALLOW_SYSTEM_SOURCE=true
+EDGE_TIME_ALLOW_HOLDOVER=true
+EDGE_TIME_MAX_UNCERTAINTY_MS=500
+
+EDGE_TIME_HTTP_TIMEOUT_SECONDS=2.0
+
+# ------------------------------------------------------------
+# Persistent state
+# ------------------------------------------------------------
+
+EDGE_TIME_STATE_DIR=/var/lib/edge-time
+EDGE_TIME_GNSS_OBSERVATION_FILE=/var/lib/edge-time/gnss.json
+EDGE_TIME_RTC_OBSERVATION_FILE=/var/lib/edge-time/rtc.json
+
+# ------------------------------------------------------------
+# NTP
+# ------------------------------------------------------------
+#
+# NTP remains available as a fallback source.
+#
+EDGE_TIME_NTP_HOST=pool.ntp.org
+EDGE_TIME_NTP_PORT=123
+
+# ------------------------------------------------------------
+# Service polling
+# ------------------------------------------------------------
+
+EDGE_TIME_POLL_SECONDS=5
+
+# ------------------------------------------------------------
+# Attestation
+# ------------------------------------------------------------
+
+EDGE_TIME_ATTESTATION_KEY=/var/lib/edge-time/identity.key
+
+# ============================================================
+# Generic edge-controller integration
+# ============================================================
+
+# Controller is hosted on spoo-lin.
+#
+# Use the host-addressed endpoint, NOT a Docker service name.
+#
+EDGE_CONTROLLER_URL=http://spoo-lin.spoocannon.com:8080
+
+# Leave empty.
+#
+# The controller client derives the node ID from the host
+# hostname, which means the same .env works on both Pis.
+#
+EDGE_NODE_ID=
+
+EDGE_SERVICE_ID=edge-time
+EDGE_SERVICE_NAME=edge-time
+
+# Keep this synchronized with the deployed edge-time
+# service/image version.
+#
+EDGE_SERVICE_VERSION=${SER_VER}
+
+EDGE_CONTROLLER_TIMEOUT=5

@@ -1,0 +1,17 @@
+services:
+  edge-time:
+    image: $(edge-time_TAG)
+    container_name: edge-time
+    restart: unless-stopped
+    env_file:
+      - .env
+    uts: host
+    ports:
+      - "${EDGE_TIME_PORT:-8095}:8095"
+    volumes:
+      - ./state:/var/lib/edge-time
+      - ./config:/etc/edge-time:ro
+    environment:
+      EDGE_TIME_STATE_DIR: /var/lib/edge-time
+      EDGE_TIME_GNSS_OBSERVATION_FILE: /var/lib/edge-time/gnss.json
+      EDGE_TIME_RTC_OBSERVATION_FILE: /var/lib/edge-time/rtc.json
