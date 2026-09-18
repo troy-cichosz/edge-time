@@ -1,0 +1,19 @@
+services:
+  edge-time:
+    image: $(edge-time_TAG)
+    container_name: edge-time
+    restart: unless-stopped
+    user: "1000:1000"
+    env_file:
+      - .env
+    uts: host
+    ports:
+      - "${EDGE_TIME_PORT:-8095}:8095"
+    volumes:
+      - ../state:/state
+      - ./config:/etc/edge-time:ro
+    environment:
+      EDGE_TIME_STATE_DIR: /state
+      EDGE_TIME_GNSS_OBSERVATION_FILE: /state/gnss.json
+      EDGE_TIME_RTC_OBSERVATION_FILE: /state/rtc.json
+      EDGE_TIME_ATTESTATION_KEY: /state/identity.key

@@ -1,0 +1,110 @@
+# ============================================================
+# edge-time
+# PLATFORM AUTHORITY
+# ============================================================
+
+# ------------------------------------------------------------
+# Service role
+# ------------------------------------------------------------
+#
+# Who is the platform time authority.
+#
+EDGE_TIME_ROLE=authority
+
+EDGE_TIME_HOST=0.0.0.0
+EDGE_TIME_PORT=8095
+
+# Leave these empty unless an explicit identity is required.
+# The service will derive its effective device identity from
+# EDGE_TIME_NODE_ID and then the host/container hostname.
+#
+EDGE_TIME_DEVICE_ID=
+EDGE_TIME_NODE_ID=
+
+# ------------------------------------------------------------
+# Platform authority identity
+# ------------------------------------------------------------
+
+EDGE_TIME_AUTHORITY_ID=spoo-lin.spoocannon.com
+EDGE_TIME_AUTHORITY_URL=
+
+# ------------------------------------------------------------
+# Local GNSS
+# ------------------------------------------------------------
+#
+# The authority does not currently consume GNSS.
+# GNSS configuration remains available for future authority
+# hardware/configuration.
+#
+EDGE_TIME_GNSS_URL=
+EDGE_TIME_GNSS_HOST=
+EDGE_TIME_GNSS_PORT=8096
+EDGE_TIME_GNSS_PATH=/observation
+
+# ------------------------------------------------------------
+# Authority source priority
+# ------------------------------------------------------------
+#
+# The authority must NOT consume its own authority endpoint.
+#
+EDGE_TIME_SOURCE_PRIORITY=ntp,rtc,system
+
+EDGE_TIME_ALLOW_SYSTEM_SOURCE=true
+EDGE_TIME_ALLOW_HOLDOVER=true
+EDGE_TIME_MAX_UNCERTAINTY_MS=500
+
+EDGE_TIME_HTTP_TIMEOUT_SECONDS=2.0
+
+# ------------------------------------------------------------
+# Persistent state
+# ------------------------------------------------------------
+
+EDGE_TIME_STATE_DIR=/state
+EDGE_TIME_GNSS_OBSERVATION_FILE=/state/gnss.json
+EDGE_TIME_RTC_OBSERVATION_FILE=/state/rtc.json
+
+# ------------------------------------------------------------
+# NTP
+# ------------------------------------------------------------
+
+EDGE_TIME_NTP_HOST=pool.ntp.org
+EDGE_TIME_NTP_PORT=123
+
+# ------------------------------------------------------------
+# Service polling
+# ------------------------------------------------------------
+
+EDGE_TIME_POLL_SECONDS=5
+
+# ------------------------------------------------------------
+# Attestation
+# ------------------------------------------------------------
+
+EDGE_TIME_ATTESTATION_KEY=/state/identity.key
+
+# ============================================================
+# Generic edge-controller integration
+# ============================================================
+
+# The controller is hosted on spoo-lin.
+#
+# Use the host-addressed endpoint, NOT a Docker service name.
+#
+EDGE_CONTROLLER_URL=http://spoo-lin.spoocannon.com:8080
+
+# Leave empty so the controller client derives the node
+# identity from the host/container hostname.
+#
+EDGE_NODE_ID=
+
+EDGE_SERVICE_ID=edge-time
+EDGE_SERVICE_NAME=edge-time
+
+# Keep this synchronized with the deployed edge-time
+# service/image version.
+#
+EDGE_SERVICE_VERSION=${SER_VER}
+
+EDGE_CONTROLLER_TIMEOUT=5
+
+EDGE_TIME_CONSISTENCY_THRESHOLD_MS=500
