@@ -228,6 +228,171 @@ class AttestationTests(unittest.TestCase):
 
             self.assertEqual(len(records), 2)
 
+    def test_sequence_file_is_reconciled_to_chain(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = self.make_settings(temp_dir)
+            store = AttestationStore(settings)
+
+            store.append(
+                {
+                    "record_type": "time_attestation",
+                    "device_id": "test-device",
+                }
+            )
+            store.append(
+                {
+                    "record_type": "time_attestation",
+                    "device_id": "test-device",
+                }
+            )
+
+            Path(
+                settings.state_dir,
+                "sequence",
+            ).write_text("40", encoding="utf-8")
+
+            recovered = AttestationStore(settings)
+
+            self.assertEqual(
+                Path(
+                    settings.state_dir,
+                    "sequence",
+                ).read_text(encoding="utf-8"),
+                "2",
+            )
+
+            third = recovered.append(
+                {
+                    "record_type": "time_attestation",
+                    "device_id": "test-device",
+                }
+            )
+
+            self.assertEqual(third["sequence"], 3)
+            self.assertTrue(recovered.verify_chain())
+
+    def test_trailing_nulls_are_backed_up_and_recovered(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = self.make_settings(temp_dir)
+            store = AttestationStore(settings)
+
+            first = store.append(
+                {
+                    "record_type": "time_attestation",
+                    "device_id": "test-device",
+                }
+            )
+
+            chain_path = Path(
+                settings.state_dir,
+                "attestations.jsonl",
+            )
+            original = chain_path.read_bytes()
+            chain_path.write_bytes(original + b"\x00" * 64)
+
+            Path(
+                settings.state_dir,
+                "sequence",
+            ).write_text("40", encoding="utf-8")
+
+            recovered = AttestationStore(settings)
+
+            self.assertEqual(
+                chain_path.read_bytes(),
+                original,
+            )
+            self.assertEqual(
+                recovered._read_chain_records()[-1]["record_hash"],
+                first["record_hash"],
+            )
+
+            backups = list(
+                Path(settings.state_dir).glob(
+                    "attestations.jsonl.recovery-*.bak"
+                )
+            )
+
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), original + b"\x00" * 64)
+
+            self.assertEqual(
+                Path(
+                    settings.state_dir,
+                    "sequence",
+                ).read_text(encoding="utf-8"),
+                "1",
+            )
+
+            second = recovered.append(
+                {
+                    "record_type": "time_attestation",
+                    "device_id": "test-device",
+                }
+            )
+
+            self.assertEqual(second["sequence"], 2)
+            self.assertEqual(
+                second["previous_hash"],
+                first["record_hash"],
+            )
+            self.assertTrue(recovered.verify_chain())
+
+    def test_sequence_failure_after_chain_write_is_recovered_from_chain(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = self.make_settings(temp_dir)
+            store = AttestationStore(settings)
+
+            original_write_sequence = store._write_sequence
+
+            def fail_sequence_write(sequence):
+                raise OSError("simulated sequence persistence failure")
+
+            store._write_sequence = fail_sequence_write
+
+            with self.assertRaises(OSError):
+                store.append(
+                    {
+                        "record_type": "time_attestation",
+                        "device_id": "test-device",
+                    }
+                )
+
+            store._write_sequence = original_write_sequence
+
+            recovered = AttestationStore(settings)
+
+            second = recovered.append(
+                {
+                    "record_type": "time_attestation",
+                    "device_id": "test-device",
+                }
+            )
+
+            self.assertEqual(second["sequence"], 2)
+            self.assertTrue(recovered.verify_chain())
+
+    def test_non_null_trailing_corruption_is_not_auto_repaired(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = self.make_settings(temp_dir)
+            store = AttestationStore(settings)
+
+            store.append(
+                {
+                    "record_type": "time_attestation",
+                    "device_id": "test-device",
+                }
+            )
+
+            chain_path = Path(
+                settings.state_dir,
+                "attestations.jsonl",
+            )
+            with chain_path.open("ab") as handle:
+                handle.write(b"corrupt-tail")
+
+            with self.assertRaises(json.JSONDecodeError):
+                AttestationStore(settings)
+
 
 if __name__ == "__main__":
     unittest.main()
