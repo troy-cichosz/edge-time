@@ -1,7 +1,11 @@
 import base64
 import hashlib
 import json
+import logging
 import os
+import shutil
+import threading
+import time
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
@@ -10,6 +14,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class AttestationStore:
@@ -23,7 +30,12 @@ class AttestationStore:
         self.seq_file = state_dir / "sequence"
         self.key_path = Path(settings.attestation_key)
 
+        self._lock = threading.Lock()
+
+        self._recover_trailing_nulls()
+
         self.key = self._load_or_create_key()
+        self._reconcile_sequence()
 
     def _load_or_create_key(self) -> Ed25519PrivateKey:
         if self.key_path.exists():
@@ -112,76 +124,179 @@ class AttestationStore:
             default=str,
         ).encode()
 
-    def _next_sequence(self) -> int:
+    def _read_chain_records(self) -> list[dict]:
+        if not self.chain_file.exists():
+            return []
+
+        records = []
+
+        for line in self.chain_file.read_text(
+            encoding="utf-8"
+        ).splitlines():
+            if not line.strip():
+                continue
+
+            records.append(json.loads(line))
+
+        if not self.verify_chain_records(records):
+            raise RuntimeError(
+                f"Attestation chain verification failed: "
+                f"{self.chain_file}"
+            )
+
+        return records
+
+    def _recover_trailing_nulls(self):
+        if not self.chain_file.exists():
+            return
+
+        data = self.chain_file.read_bytes()
+
+        if not data or not data.endswith(b"\n"):
+            return
+
+        last_newline = data.rfind(b"\n")
+        tail = data[last_newline + 1:]
+
+        if not tail or not all(byte == 0 for byte in tail):
+            return
+
+        backup = self.chain_file.with_name(
+            f"{self.chain_file.name}.recovery-{time.time_ns()}.bak"
+        )
+
+        shutil.copy2(self.chain_file, backup)
+
+        with self.chain_file.open("r+b") as handle:
+            handle.truncate(last_newline + 1)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        logger.warning(
+            "Recovered trailing NUL bytes from attestation chain; "
+            "original state preserved at %s",
+            backup,
+        )
+
+    def _write_sequence(self, sequence: int):
+        temporary = self.seq_file.with_name(
+            f"{self.seq_file.name}.tmp-{os.getpid()}"
+        )
+
+        try:
+            with temporary.open("w", encoding="utf-8") as handle:
+                handle.write(str(sequence))
+                handle.flush()
+                os.fsync(handle.fileno())
+
+            os.replace(temporary, self.seq_file)
+
+            try:
+                directory_fd = os.open(
+                    self.seq_file.parent,
+                    os.O_RDONLY,
+                )
+            except OSError:
+                directory_fd = None
+
+            if directory_fd is not None:
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+    def _reconcile_sequence(self):
+        records = self._read_chain_records()
+
+        sequence = records[-1]["sequence"] if records else 0
+
         if self.seq_file.exists():
             value = self.seq_file.read_text().strip()
 
             try:
-                sequence = int(value)
+                persisted = int(value)
             except ValueError as exc:
                 raise RuntimeError(
                     f"Invalid attestation sequence file: {self.seq_file}"
                 ) from exc
 
-            sequence += 1
-        else:
-            sequence = 1
+            if persisted == sequence:
+                return
 
-        self.seq_file.write_text(str(sequence))
+        self._write_sequence(sequence)
 
-        return sequence
+        logger.warning(
+            "Reconciled attestation sequence file to persisted chain "
+            "sequence %s",
+            sequence,
+        )
 
-    def _previous_hash(self):
-        if not self.chain_file.exists():
+    def _next_sequence(self, records: list[dict]) -> int:
+        if not records:
+            return 1
+
+        return records[-1]["sequence"] + 1
+
+    def _previous_hash(self, records: list[dict]):
+        if not records:
             return None
 
-        lines = self.chain_file.read_text().splitlines()
-
-        if not lines:
-            return None
-
-        return json.loads(lines[-1]).get("record_hash")
+        return records[-1].get("record_hash")
 
     def append(self, payload: dict):
         payload = dict(payload)
 
-        sequence = self._next_sequence()
-        previous_hash = self._previous_hash()
+        with self._lock:
+            records = self._read_chain_records()
 
-        payload.update(
-            {
-                "sequence": sequence,
-                "previous_hash": previous_hash,
-            }
-        )
+            sequence = self._next_sequence(records)
+            previous_hash = self._previous_hash(records)
 
-        canonical = self.canonical_bytes(payload)
-
-        record_hash = hashlib.sha256(canonical).hexdigest()
-
-        signature = base64.b64encode(
-            self.key.sign(canonical)
-        ).decode()
-
-        public_key = self.public_key_b64()
-
-        payload.update(
-            {
-                "record_hash": record_hash,
-                "signature": signature,
-                "public_key": public_key,
-            }
-        )
-
-        with self.chain_file.open("a", encoding="utf-8") as handle:
-            handle.write(
-                json.dumps(
-                    payload,
-                    default=str,
-                    separators=(",", ":"),
-                )
-                + "\n"
+            payload.update(
+                {
+                    "sequence": sequence,
+                    "previous_hash": previous_hash,
+                }
             )
+
+            canonical = self.canonical_bytes(payload)
+
+            record_hash = hashlib.sha256(canonical).hexdigest()
+
+            signature = base64.b64encode(
+                self.key.sign(canonical)
+            ).decode()
+
+            public_key = self.public_key_b64()
+
+            payload.update(
+                {
+                    "record_hash": record_hash,
+                    "signature": signature,
+                    "public_key": public_key,
+                }
+            )
+
+            with self.chain_file.open(
+                "a",
+                encoding="utf-8",
+            ) as handle:
+                handle.write(
+                    json.dumps(
+                        payload,
+                        default=str,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+
+            self._write_sequence(sequence)
 
         return payload
 
@@ -247,17 +362,5 @@ class AttestationStore:
         return True
 
     def verify_chain(self) -> bool:
-        if not self.chain_file.exists():
-            return True
-
-        records = []
-
-        for line in self.chain_file.read_text(
-            encoding="utf-8"
-        ).splitlines():
-            if not line.strip():
-                continue
-
-            records.append(json.loads(line))
-
-        return self.verify_chain_records(records)
+        self._read_chain_records()
+        return True
