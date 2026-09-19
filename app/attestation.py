@@ -152,13 +152,16 @@ class AttestationStore:
 
         data = self.chain_file.read_bytes()
 
-        if not data or not data.endswith(b"\n"):
+        if not data or not data.endswith(b"\x00"):
             return
 
-        last_newline = data.rfind(b"\n")
-        tail = data[last_newline + 1:]
+        valid_end = len(data.rstrip(b"\x00"))
 
-        if not tail or not all(byte == 0 for byte in tail):
+        # Only recover NUL padding that follows a complete JSONL record.
+        # If the bytes before the NUL run do not end at a newline, the
+        # corruption may include a partial/non-NUL record and must not be
+        # silently discarded.
+        if valid_end == 0 or data[valid_end - 1:valid_end] != b"\n":
             return
 
         backup = self.chain_file.with_name(
@@ -168,7 +171,7 @@ class AttestationStore:
         shutil.copy2(self.chain_file, backup)
 
         with self.chain_file.open("r+b") as handle:
-            handle.truncate(last_newline + 1)
+            handle.truncate(valid_end)
             handle.flush()
             os.fsync(handle.fileno())
 
