@@ -36,4 +36,6 @@ The service must not expand into controller-mediated timestamp brokering.
 
 ## Handoff
 
-The next platform consumer is edge-video. After video temporal integration is verified, common temporal/evidence manifest integration can proceed.
+edge-audio and edge-video temporal integration are complete and verified.
+
+The next platform work is validation and alignment of the common evidence architecture across edge-video and edge-audio. The existing Capture Time Context contract remains the temporal foundation; no controller-mediated timestamp path should be introduced.
