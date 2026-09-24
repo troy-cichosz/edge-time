@@ -29,7 +29,7 @@ jobs:
             if [ "$suffix" = "master" ]; then
               repo_env="master"
             else
-              repo_env="develop"
+              repo_env="chatgpt"
             fi
             echo "##vso[task.setvariable variable=REPO_ENV]$repo_env"    
             echo "Build ENV: $repo_env"
