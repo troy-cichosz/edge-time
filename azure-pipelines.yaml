@@ -1,0 +1,274 @@
+trigger:
+  - '*.*'
+
+# Build agent
+pool:  'Linux ARM 64bit'
+
+variables:
+  - group: 'GitHub'
+  - name: LDR
+    value: 'docker.spoocannon.com:5000'
+  - name: containerRegistry
+    value: 'Spoocannon Docker Registry'
+  - name: serviceName
+    value: 'edge-time'
+jobs:
+  - job: BuildAndPush
+    displayName: 'Build and Push Docker Images'
+    pool:
+      name: 'Linux ARM 64bit' #'Linux x86 64bit'
+    steps:
+      - task: Bash@3
+        displayName: 'Read Tags from Version Files'
+        name: 'readVARs'
+        inputs:
+          targetType: 'inline'
+          script: |
+            echo "Setting repository paths based on branch: $(Build.SourceBranchName)"
+            suffix="$(Build.SourceBranchName)"
+            if [ "$suffix" = "master" ]; then
+              repo_env="master"
+            else
+              repo_env="chatgpt"
+            fi
+            echo "##vso[task.setvariable variable=REPO_ENV]$repo_env"    
+            echo "Build ENV: $repo_env"
+
+            echo "Setting versioning based on branch: $(Build.SourceBranchName)"
+            suffix="$(Build.SourceBranchName)"
+            if [ "$suffix" = "master" ]; then
+              VERSION="$(cat ver.txt)"
+            else
+              VERSION="$(cat ver.txt)-$(Build.BuildNumber)"
+            fi
+            echo " Version: $VERSION"
+            
+            echo "##vso[task.setvariable variable=VERSION;isOutput=true]$VERSION"      
+               
+    # Compose PIPELINE VARS
+      - task: Bash@3
+        displayName: 'Compose Pipeline VARs'
+        name: composeVars
+        inputs:
+          targetType: 'inline'
+          script: |
+            echo "Composing pipeline VARs..."
+            REPO_ENV="${REPO_ENV}"
+            echo "Build ENV: $REPO_ENV"
+            VER="$(readVARs.VERSION)"
+            echo "##vso[task.setvariable variable=VER]$VER"
+            echo "$(serviceName) VERSION: $VER"        
+
+            LDR_IMAGE="$(LDR)/$(serviceName):${REPO_ENV}-${VER}"
+            echo "$(serviceName) IMAGE TO BUILD: $LDR_IMAGE"
+            echo "##vso[task.setvariable variable=LDR_IMAGE]$LDR_IMAGE"
+
+      - task: Bash@3
+        displayName: 'Replace VERSION token in main'
+        inputs:
+          targetType: 'inline'
+          script: |
+            VER="$(readVARs.VERSION)"
+            TOKEN='$'"{SER_VER}"
+
+            for FILE in app/main.py app/controller.py; do
+              echo "Updating $FILE: $TOKEN -> $VER"
+              sed -i "s|$TOKEN|$VER|g" "$FILE"
+              grep -n 'EDGE_SERVICE_VERSION' "$FILE" || true
+              cat app/main.py
+            done
+      
+      - task: Bash@3
+        displayName: 'Replace VERSION token in environment files'
+        inputs:
+          targetType: 'inline'
+          script: |
+            VER="$(readVARs.VERSION)"
+            TOKEN='$'"{SER_VER}"
+
+            for FILE in .envSAMPLE .envMine; do
+              echo "Updating $FILE: $TOKEN -> $VER"
+              sed -i "s|$TOKEN|$VER|g" "$FILE"
+              grep -n 'EDGE_SERVICE_VERSION' "$FILE" || true
+              cat .envSAMPLE
+              cat .envMine
+            done
+                 
+
+      - task: Bash@3
+        displayName: 'Login to Local Registry'
+        inputs:
+          targetType: 'inline'
+          script: |
+            echo "otto" | docker login $(LDR) -u "otto" --password-stdin
+
+      - task: Bash@3
+        displayName: 'Verify Trivy'
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -e
+            trivy --version
+
+      - script: |
+          set -e
+          mkdir $(Build.ArtifactStagingDirectory)/metadata
+          mkdir $(Build.ArtifactStagingDirectory)/files
+          mkdir $(Build.ArtifactStagingDirectory)/scans
+          ls -la         
+          cp .env* -r $(Build.ArtifactStagingDirectory)/files
+          cp *.txt *.md $(Build.ArtifactStagingDirectory)/files
+          cp docker-compose.yaml Dockerfile $(Build.ArtifactStagingDirectory)/files
+          cp scripts/*.sh -r $(Build.ArtifactStagingDirectory)/files
+          mv $(Build.ArtifactStagingDirectory)/files/.envMine $(Build.ArtifactStagingDirectory)/files/.env
+        displayName: 'Copy files into artifact'
+
+
+      - task: Bash@3
+        displayName: 'Initialize Docker Buildx'
+        inputs:
+          targetType: 'inline'
+          script: |
+            set -e
+
+            docker buildx version
+
+            docker buildx inspect edge-time-builder >/dev/null 2>&1 || \
+              docker buildx create \
+                --name edge-time-builder \
+                --driver docker-container
+
+            docker buildx use edge-time-builder
+
+            docker buildx inspect --bootstrap
+
+
+
+      - script: |
+          set -e
+
+          echo "Building multi-platform image:"
+          echo "  $(LDR_IMAGE)"
+          echo "  Platforms: linux/amd64, linux/arm64"
+
+          if [ "$(Build.SourceBranchName)" = "master" ]; then
+            docker buildx build \
+              --no-cache \
+              --platform linux/amd64,linux/arm64 \
+              -t "$(LDR_IMAGE)" \
+              -f Dockerfile \
+              --push \
+              .
+            echo "Scanning $(LDR_IMAGE)"
+            trivy image \
+              --severity CRITICAL \
+              --ignore-unfixed \
+              --exit-code 0 \
+              $(LDR_IMAGE) \
+              > $(Build.ArtifactStagingDirectory)/scans/Trivy-$(serviceName)-scan.txt
+
+            #echo "Pushing $(LDR_IMAGE)"
+            #docker push $(LDR_IMAGE)
+
+            echo "$(LDR_IMAGE)" > $(Build.ArtifactStagingDirectory)/metadata/TAG.txt              
+          else
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              -t "$(LDR_IMAGE)" \
+              -f Dockerfile \
+              --push \
+              .
+            #echo "Pushing $(LDR_IMAGE)"
+            #docker push $(LDR_IMAGE)
+
+            echo "$(LDR_IMAGE)" > $(Build.ArtifactStagingDirectory)/metadata/TAG.txt
+          fi
+
+          echo "Inspecting published manifest:"
+          docker buildx imagetools inspect "$(LDR_IMAGE)"
+
+          echo "$(LDR_IMAGE)" > \
+            "$(Build.ArtifactStagingDirectory)/metadata/TAG.txt"
+
+        displayName: 'Build and Push $(serviceName) Multi-Platform Images'
+       
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish $(serviceName) Metadata Artifact'
+        # condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'master'))
+        inputs:
+          PathtoPublish: "$(Build.ArtifactStagingDirectory)/metadata"
+          ArtifactName: "$(serviceName)-metadata"
+          publishLocation: "Container"
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish $(serviceName) Files Artifact'
+        # condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'master'))
+        inputs:
+          PathtoPublish: "$(Build.ArtifactStagingDirectory)/files"
+          ArtifactName: "$(serviceName)-files"
+          publishLocation: "Container"
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish $(serviceName) Scans Artifact'
+        # condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'master'))
+        inputs:
+          PathtoPublish: "$(Build.ArtifactStagingDirectory)/scans"
+          ArtifactName: "$(serviceName)-scans"
+          publishLocation: "Container"
+      
+  - job: Push
+    dependsOn: 
+      - BuildAndPush
+    condition: eq(dependencies.BuildAndPush.result,'Succeeded')
+    displayName: 'Assemble repo for push to public GitHub'
+    pool:
+      name: 'Linux x86 64bit'
+
+    steps:
+    - checkout: self
+    - task: Bash@3
+      displayName: 'Checkout as orphan $(branch2Push) branch'
+      inputs:
+        targetType: 'inline'
+        script: |
+          git branch -D $(branch2Push)
+          git checkout --orphan $(branch2Push)
+          git rm --cached -r .   
+        workingDirectory: $(Build.SourcesDirectory)
+
+    - task: DeleteFiles@1
+      displayName: 'Delete unnecessary files before push to $(branch2Push) remote'
+      #condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+
+      inputs:
+        SourceFolder: $(Build.SourcesDirectory)
+        Contents: |
+          .gitignore
+          api/app/__pycache__/**
+          #azure-pipelines*.*
+          #.env
+
+
+    - script: |
+        git config --global user.name "$(gitUID)"
+        git add .
+        git commit -m "$(gitCommit)"       
+      displayName: 'Commit unnecessary file deletion'
+      #condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+      workingDirectory: $(Build.SourcesDirectory)
+
+    - task: InstallSSHKey@0
+      #condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+      displayName: 'Install the SSH key'
+      inputs:
+        knownHostsEntry: '$(known_hosts_entry)'
+        sshPublicKey: '$(git_pk)'
+        sshKeySecureFile: '$(secFile)'
+
+    - task: CmdLine@2
+      displayName: 'Push to Public GitHub'
+      #condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+      inputs:
+        script: |
+          ssh-keyscan -t $(keyID) github.com >> ~/.ssh/known_hosts
+          git push git@github.com:$(gitUID)/$(repoName).git HEAD:refs/heads/$(branch2Push) --force --tags
