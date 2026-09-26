@@ -4,10 +4,10 @@
 
 ## Logical Roles
 
-1. **Source adapters** — GNSS, RTC, NTP, system clock, and platform authority observations.
-2. **Time agent** — local source selection, fallback, existing holdover behavior, uncertainty, freshness, and monotonic correlation.
-3. **Authority service** — platform-designated distribution point for the current timing architecture.
-4. **Capture Time Context** — evidence-facing contract that binds the selected timing state to a capture/acquisition instant and its cryptographic attestation.
+1. **Source adapters** - GNSS, RTC, NTP, system clock, and platform authority observations.
+2. **Time agent** - local source selection, fallback, existing holdover behavior, uncertainty, freshness, and monotonic correlation.
+3. **Authority service** - platform-designated distribution point for the current timing architecture.
+4. **Capture Time Context** - evidence-facing contract that binds the selected timing state to a capture/acquisition instant and its cryptographic attestation.
 
 The controller remains the management/policy/registration/audit plane. It is not a timestamp broker.
 

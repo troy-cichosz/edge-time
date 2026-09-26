@@ -1,4 +1,4 @@
-# edge-time — Sprint Status
+# edge-time - Sprint Status
 
 **Current sprint:** Temporal foundation verification / evidence integration  
 **Status:** CORE FOUNDATION COMPLETE  

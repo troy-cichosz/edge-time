@@ -1,4 +1,4 @@
-# edge-time — Service Status
+# edge-time - Service Status
 
 **Purpose:** Current development phase and maturity of the distributed time service.  
 **Status:** Core operational / evidence-facing foundation complete  
@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-**Phase 1 — Authoritative Time Foundation: CORE OPERATIONAL**
+**Phase 1 - Authoritative Time Foundation: CORE OPERATIONAL**
 
 The distributed authority/agent foundation and Capture Time Context contract are operational.
 
